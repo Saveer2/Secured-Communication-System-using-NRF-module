@@ -91,7 +91,7 @@ The transmitter ESP32:
 
 ---
 
-## 📺 Receiver
+## Receiver
 
 The receiver ESP32:
 - Listens for incoming RF packets on channel 76
@@ -115,7 +115,7 @@ Both transmitter and receiver must have matching radio settings:
 
 ---
 
-## ⚠️ Important Notes
+## Important Notes
 
 - Keep both ESP32s within range during testing (start within 1 meter)
 - Always power nRF24L01 through the 3.3V adapter, never directly from 5V
