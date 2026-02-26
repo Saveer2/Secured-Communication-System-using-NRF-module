@@ -1,0 +1,16 @@
+nRF24L01 Adapter to ESP32:
+
+VCC → 3.3V
+GND → GND
+CE → D4
+CSN → D5
+SCK → D18
+MOSI → D23
+MISO → D19
+
+LCD 16x2 I2C to ESP32 (Receiver Only):
+
+VCC → VIN (5V)
+GND → GND
+SDA → D21
+SCL → D22

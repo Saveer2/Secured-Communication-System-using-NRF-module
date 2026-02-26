@@ -1,0 +1,268 @@
+//Secured communication system using NRF module - Saveer
+
+#include <SPI.h>
+#include <RF24.h>
+#include <AESLib.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
+#define CE_PIN   4
+#define CSN_PIN  5
+
+RF24      radio(CE_PIN, CSN_PIN);
+AESLib    aesLib;
+WebServer server(80);
+
+//WiFi Credentials 
+const char* ssid     = "YOUR_WIFI_NAME";     
+const char* password = "YOUR_WIFI_PASSWORD"; 
+
+//RF address (must match receiver) 
+const byte address[6] = "SECR1";
+
+//AES Key & IV
+byte aesKey[16] = {
+  0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6,
+  0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C
+};
+byte aesIV[16] = {
+  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+  0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
+};
+
+char    inputMsg[17] = "";
+uint8_t encBuf[32];
+bool    newMessage = false;
+String  lastStatus = "No message sent yet.";
+
+//Web Page HTML 
+String getPage() {
+  String html = R"rawhtml(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Secure Transmitter</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .card {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 32px;
+      width: 360px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    h2 {
+      text-align: center;
+      color: #00d4ff;
+      margin-bottom: 8px;
+      font-size: 22px;
+    }
+    p.sub {
+      text-align: center;
+      color: #888;
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+    input[type=text] {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #00d4ff44;
+      background: #0f3460;
+      color: #fff;
+      font-size: 16px;
+      outline: none;
+      margin-bottom: 8px;
+    }
+    .counter {
+      text-align: right;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 16px;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #00d4ff;
+      color: #1a1a2e;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover { background: #00b8d9; }
+    .status {
+      margin-top: 20px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #0f3460;
+      text-align: center;
+      font-size: 14px;
+      color: #00d4ff;
+    }
+    .lock {
+      text-align: center;
+      font-size: 36px;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="lock"></div>
+    <h2>Secure Transmitter</h2>
+    <p class="sub">AES-128 Encrypted · nRF24L01</p>
+    <form action="/send" method="POST">
+      <input type="text" name="msg" id="msgInput"
+             placeholder="Type message..." 
+             maxlength="16" autocomplete="off" autofocus/>
+      <div class="counter"><span id="count">0</span>/16</div>
+      <button type="submit">🚀 Send Message</button>
+    </form>
+    <div class="status">)rawhtml";
+
+  html += lastStatus;
+
+  html += R"rawhtml(</div>
+  </div>
+  <script>
+    const input = document.getElementById('msgInput');
+    const count = document.getElementById('count');
+    input.addEventListener('input', () => {
+      count.textContent = input.value.length;
+    });
+  </script>
+</body>
+</html>
+)rawhtml";
+
+  return html;
+}
+
+//Handle root page
+void handleRoot() {
+  server.send(200, "text/html", getPage());
+}
+
+//Handle message send 
+void handleSend() {
+  if (server.hasArg("msg")) {
+    String msg = server.arg("msg");
+    msg.trim();
+
+    if (msg.length() == 0) {
+      lastStatus = "Empty message!";
+    } else {
+      if (msg.length() > 16) msg = msg.substring(0, 16);
+
+      memset(inputMsg, 0, sizeof(inputMsg));
+      memcpy(inputMsg, msg.c_str(), msg.length());
+      newMessage = true;
+
+      Serial.print(">> Web message: \"");
+      Serial.print(inputMsg);
+      Serial.println("\"");
+    }
+  }
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
+
+
+
+
+
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  //WiFi
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(ssid);
+  WiFi.begin(ssid, password);
+
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 20) {
+    delay(500);
+    Serial.print(".");
+    tries++;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Connected!");
+    Serial.print("Open this IP in your browser: http://");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi FAILED — check credentials.");
+  }
+
+  //Web Server
+  server.on("/",     HTTP_GET,  handleRoot);
+  server.on("/send", HTTP_POST, handleSend);
+  server.begin();
+  Serial.println("Web server started.");
+
+  //Radio
+  SPI.begin(18, 19, 23, 5);
+
+  if (!radio.begin()) {
+    Serial.println("ERROR: nRF24L01 not found!");
+    while (1);
+  }
+
+  delay(100);
+  radio.setPALevel(RF24_PA_MIN);
+  radio.setDataRate(RF24_1MBPS);
+  radio.setChannel(76);
+  radio.setCRCLength(RF24_CRC_16);
+  radio.setAutoAck(true);
+  radio.openWritingPipe(address);
+  radio.stopListening();
+
+  aesLib.set_paddingmode(paddingMode::CMS);
+
+  Serial.println("Radio OK! System ready.");
+}
+
+
+
+
+
+
+void loop() {
+  server.handleClient();  // handle web requests
+
+  if (newMessage) {
+    byte iv[16];
+    memcpy(iv, aesIV, 16);
+    memset(encBuf, 0, sizeof(encBuf));
+    aesLib.encrypt((byte*)inputMsg, 16, encBuf, aesKey, 128, iv);
+
+    bool success = radio.write(encBuf, 32);
+
+    if (success) {
+      Serial.println("Transmitted successfully!");
+      lastStatus = " Sent: " + String(inputMsg);
+    } else {
+      Serial.println("Transmission FAILED.");
+      lastStatus = " Failed to send!";
+    }
+
+    newMessage = false;
+  }
+
+  delay(10);
+}

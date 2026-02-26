@@ -1,0 +1,7 @@
+// Secured communication system using NRF module
+
+This project is still not completed yet...
+
+This code and circuit connections are for prototype but that prototype is successful!!
+
+Final project will be updated soon!!

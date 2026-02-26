@@ -1,0 +1,129 @@
+// Secured communication system using NRF module - Saveer
+
+
+#include <SPI.h>
+#include <RF24.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <AESLib.h>
+
+#define CE_PIN   4    
+#define CSN_PIN  5    
+
+RF24               radio(CE_PIN, CSN_PIN);
+AESLib             aesLib;
+LiquidCrystal_I2C  lcd(0x27, 16, 2);
+
+const byte address[6] = "SECR1";
+
+byte aesKey[16] = {
+  0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6,
+  0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C
+};
+byte aesIV[16] = {
+  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+  0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F
+};
+
+uint8_t encBuf[32];
+char    decBuf[32];
+
+void lcdWaiting() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Waiting for msg.");
+  lcd.setCursor(0, 1);
+  lcd.print("................");
+}
+
+void lcdShowMessage(const char* msg) {
+  String text = String(msg);
+  text.trim();
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(">> MSG RECEIVED:");
+
+  if (text.length() <= 16) {
+    lcd.setCursor(0, 1);
+    lcd.print(text);
+  } else {
+    String scrollText = text + "                ";
+    for (int i = 0; i <= (int)scrollText.length() - 16; i++) {
+      lcd.setCursor(0, 1);
+      lcd.print(scrollText.substring(i, i + 16));
+      delay(350);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  //LCD
+  Wire.begin(21, 22);
+  lcd.init();
+  lcd.backlight();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(" Secure  Comm  ");
+  lcd.setCursor(0, 1);
+  lcd.print(" System Ready  ");
+  delay(2000);
+  lcdWaiting();
+
+  //Radio
+  SPI.begin(18, 19, 23, 5);  // SCK, MISO, MOSI, SS
+
+  if (!radio.begin()) {
+    Serial.println("ERROR: nRF24L01 not found! Check wiring.");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("NRF24 ERROR!");
+    lcd.setCursor(0, 1);
+    lcd.print("Check wiring...");
+    while (1);
+  }
+
+  delay(100);
+
+  radio.setPALevel(RF24_PA_MIN);
+  radio.setDataRate(RF24_1MBPS);     // this is imp
+  radio.setChannel(76);              // this too is imp
+  radio.setCRCLength(RF24_CRC_16);
+  radio.setAutoAck(true);
+  radio.openReadingPipe(0, address);
+  radio.startListening();
+
+  aesLib.set_paddingmode(paddingMode::CMS);
+
+  Serial.println("Receiver ready. Listening...");
+}
+
+void loop() {
+  if (radio.available()) {
+    memset(encBuf, 0, sizeof(encBuf));
+    memset(decBuf, 0, sizeof(decBuf));
+    radio.read(encBuf, 32);
+
+    Serial.print("Encrypted: ");
+    for (int i = 0; i < 16; i++) Serial.printf("%02X ", encBuf[i]);
+    Serial.println();
+
+    byte iv[16];
+    memcpy(iv, aesIV, 16);
+
+    int decLen = aesLib.decrypt(encBuf, 32, (byte*)decBuf, aesKey, 128, iv);
+    if (decLen > 0) decBuf[decLen] = '\0';
+    else decBuf[16] = '\0';
+
+    Serial.print("Decrypted: \"");
+    Serial.print(decBuf);
+    Serial.println("\"");
+
+    lcdShowMessage(decBuf);
+    delay(3000);
+    lcdWaiting();
+  }
+}
